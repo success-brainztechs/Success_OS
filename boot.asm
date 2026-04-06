@@ -1,51 +1,134 @@
+; ==============================
+; SuccessOS Bootloader (Phase 3)
+; ==============================
 
-[org 0x7c00] ;BIOS loads here
-
+[org 0x7c00]
 
 start:
-	mov [BOOT_DRIVE], dl ; Save boot drive
+    mov [BOOT_DRIVE], dl
 
-	mov bp, 0x8000
-	mov sp, bp ; Setup stack
+    mov bp, 0x8000
+    mov sp, bp
 
-	; Load kernel (sector 2 -> memory 0x1000)
-	mov ah, 0x02 ; BIOS read sector
-	mov al, 1 ; Number of sectors to read
-	mov ch, 0 ; Cylinder
-	mov cl, 2 ; Sector (starts at 1, so 2 = next)
-	mov dh, 0 ; Head
-	mov dl, [BOOT_DRIVE] ; Drive
+    ; -------------------------
+    ; Load kernel (still happens)
+    ; -------------------------
+    mov ah, 0x02
+    mov al, 1
+    mov ch, 0
+    mov cl, 2
+    mov dh, 0
+    mov dl, [BOOT_DRIVE]
 
-	mov bx, 0x1000 ; Load address
-	int 0x13 ; Disk read
+    mov bx, 0x1000
+    int 0x13
 
-	jc disk_error ; If carry flag set -> error
+    jc disk_error
 
-	jmp 0x0000:0x1000 ; Jump to kernel
+    ; -------------------------
+    ; ENTER PROTECTED MODE
+    ; -------------------------
+    cli                     ; Disable interrupts
+
+    lgdt [gdt_descriptor]   ; Load GDT
+
+    mov eax, cr0
+    or eax, 1               ; Set PE bit
+    mov cr0, eax
+
+    ; Far jump to flush pipeline
+    jmp 0x08:protected_mode_start
+
+
+; ==============================
+; 32-bit CODE
+; ==============================
+[bits 32]
+
+protected_mode_start:
+    mov ax, 0x10
+    mov ds, ax
+    mov ss, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+    mov esp, 0x90000
+
+    ; Write "OK" to screen (VGA memory)
+    mov edi, 0xb8000
+    mov eax, 0x2f4b2f4f   ; 'O' 'K'
+    mov [edi], eax
+
+hang:
+    jmp hang
+
+
+; ==============================
+; ERROR HANDLING (still 16-bit)
+; ==============================
+[bits 16]
 
 disk_error:
-	mov si, error_msg
-	call print_string
-	jmp $
-
-; ---------------------------
+    mov si, error_msg
+    call print_string
+    jmp $
 
 print_string:
-	mov ah, 0x0e
+    mov ah, 0x0e
 .loop:
-	lodsb
-	cmp al, 0
-	je .done
-	int 0x10
-	jmp .loop
+    lodsb
+    cmp al, 0
+    je .done
+    int 0x10
+    jmp .loop
 .done:
-	ret
+    ret
 
 error_msg db "Disk read error!", 0
 
+
+; ==============================
+; GDT (Global Descriptor Table)
+; ==============================
+
+gdt_start:
+
+gdt_null:
+    dd 0x0
+    dd 0x0
+
+gdt_code:
+    dw 0xffff
+    dw 0x0
+    db 0x0
+    db 10011010b
+    db 11001111b
+    db 0x0
+
+gdt_data:
+    dw 0xffff
+    dw 0x0
+    db 0x0
+    db 10010010b
+    db 11001111b
+    db 0x0
+
+gdt_end:
+
+gdt_descriptor:
+    dw gdt_end - gdt_start - 1
+    dd gdt_start
+
+
+; ==============================
+; DATA
+; ==============================
 BOOT_DRIVE db 0
 
-times 510-($-$$) db 0
-dw 0xaa55
 
+; ==============================
+; BOOT SIGNATURE
+; ==============================
+times 510-($-$$) db 0
 dw 0xaa55
