@@ -1,27 +1,51 @@
-; SuccessOS Bootloader (Phase 1)
 
 [org 0x7c00] ;BIOS loads here
 
+
 start:
-	mov si, message ; SI = pointer to string
+	mov [BOOT_DRIVE], dl ; Save boot drive
 
-print:
-	lodsb ; Load next byte from [SI] -> AL
-	cmp al, 0 ; End of string?
-	je hang
+	mov bp, 0x8000
+	mov sp, bp ; Setup stack
 
-	mov ah, 0x0e ; BIOS teletype function
-	int 0x10 ; Print AL
+	; Load kernel (sector 2 -> memory 0x1000)
+	mov ah, 0x02 ; BIOS read sector
+	mov al, 1 ; Number of sectors to read
+	mov ch, 0 ; Cylinder
+	mov cl, 2 ; Sector (starts at 1, so 2 = next)
+	mov dh, 0 ; Head
+	mov dl, [BOOT_DRIVE] ; Drive
 
-	jmp print
+	mov bx, 0x1000 ; Load address
+	int 0x13 ; Disk read
 
-hang:
-	jmp $ ; Infinite loop
+	jc disk_error ; If carry flag set -> error
 
-message db "SuccessOS Booting...", 0
+	jmp 0x0000:0x1000 ; Jump to kernel
 
-; Fill remaining space to 512 bytes
+disk_error:
+	mov si, error_msg
+	call print_string
+	jmp $
+
+; ---------------------------
+
+print_string:
+	mov ah, 0x0e
+.loop:
+	lodsb
+	cmp al, 0
+	je .done
+	int 0x10
+	jmp .loop
+.done:
+	ret
+
+error_msg db "Disk read error!", 0
+
+BOOT_DRIVE db 0
+
 times 510-($-$$) db 0
+dw 0xaa55
 
-; Boot signature (required)
 dw 0xaa55
